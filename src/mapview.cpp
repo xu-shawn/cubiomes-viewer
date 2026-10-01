@@ -613,8 +613,11 @@ void MapView::mouseMoveEvent(QMouseEvent *e)
             focusx = focusx - d.x() / blocks2pix;
             focusz = focusz - d.y() / blocks2pix;
             elapsed1.start();
+            // Only consume the pointer motion when it has been applied. Motion events can arrive
+            // more often than every 5 ms (uncompressed input on Wayland, high polling rate mice);
+            // advancing mprev for those as well would discard their movement.
+            mprev = e->pos();
         }
-        mprev = e->pos();
         update();//repaint();
     }
 }
