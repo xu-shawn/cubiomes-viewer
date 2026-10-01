@@ -52,9 +52,62 @@ cannot disturb existing sessions. Session files written with Tectonic on contain
   shading, contours) use it as well.
 * The climate layers (temperature, humidity, continentalness, erosion, weirdness, depth) show Tectonic's values, as
   the biome source sees them; "depth" is the terrain offset. Their per-octave sub-options do not apply.
-* `--grab=map.png [--grab-window=window.png] [--layer=mode,disp] [--grab-size=WxH]` renders the map of the saved
-  settings to an image and exits; with `QT_QPA_PLATFORM=offscreen` no window appears. Layer 0 is biomes, 12 is
-  height (display 4 = tints, 5 = tints + outline).
+* `--grab=map.png [--grab-window=window.png] [--layer=mode,disp] [--grab-size=WxH] [--grab-zoom=s:second.png]`
+  renders the map of the saved settings to an image and exits (and prints tile timings); with
+  `QT_QPA_PLATFORM=offscreen` no window appears. Layer 0 is biomes, 12 is height (display 4 = tints,
+  5 = tints + outline).
+
+### Relief view (contours)
+
+*Layer > Relief contours* (toolbar button with the contour rings, `Ctrl+Shift+R`) draws the surface height on top
+of the ordinary biome map: contour lines that are lighter than the ground on slopes facing the light in the
+north-west and darker on slopes facing away (illuminated contours), a dark index contour every fifth line, sea
+level as its own line, depth contours in water, and a soft hillshade underneath. It is off by default and applies
+to the biome layer of the Overworld; the Nether and the End keep the plain biome map.
+
+*Layer > Relief options...*:
+
+* **Contour interval**: automatic (2 to 64 blocks, following the zoom, so that lines are a few pixels apart on
+  ordinary slopes) or a fixed number of blocks.
+* **Soft hillshade**, **line strength**.
+* **Resolution**: *Fast* samples the terrain once per 1-4 screen pixels, *Fine* once per 0.5-2 pixels (biome borders
+  and contours are then twice as detailed, at up to 16 times the cost).
+
+The options are saved with the settings (`map/relief*`), not in session files.
+
+Where lines would be closer than about 2.5 pixels (steep slopes, zoomed out) they turn into shading of the same
+tone instead of merging into black. From 16 blocks per pixel on (*Fast*) or 64 (*Fine*) the samples are too far
+apart to trace lines, and only the shading (and at first the index contours) remains.
+
+Heights: with Tectonic the **base surface** (exact; Tectonic's peaks, which add up to ~130 blocks on mountain
+crests, are not included). For vanilla worlds the library's surface estimate: for 1.18+ the same climate sample
+that selects the biome also gives the height, for older versions it is the estimate of the height layer (slower,
+about 0.35 s per tile).
+
+How it stays fast: a tile samples biome and height of each pixel once in the map worker threads and keeps the
+heights. For Tectonic and for 1.18+ both come out of one evaluation, so the relief costs the same per sample as
+the plain biome map; because it needs fewer samples per screen pixel than the plain Tectonic map it is in fact
+cheaper. The image is rendered from the cached heights at 1, 2 or 4 pixels per sample, so lines stay about one
+screen pixel wide; zooming within a level only renders images again (0.5-5 ms per tile), it does not sample again.
+
+Measured with 3 map threads on a busy 12-thread machine (so +-30%), map of 896 x 976 pixels, tiles of 128 x 128
+samples; worker seconds per megapixel of map (in brackets: milliseconds per tile):
+
+| blocks per pixel | Tectonic plain map | Tectonic relief, fast | Tectonic relief, fine | vanilla 26.3 plain | vanilla relief, fast | vanilla relief, fine |
+|---|---|---|---|---|---|---|
+| 1   | 1.5 (10) | 0.6 (36) | 4.6 (30) | 1.4 (10) | 0.5 (37) | 1.5 (10) |
+| 2.7 | 8.9 (9)  | 2.8 (34) | 2.8 (34) | 2.5 (36) | 2.2 (32) | 2.2 (32) |
+| 4   | 5.8 (38) | 0.7 (36) | 4.9 (32) | 5.1 (34) | 0.7 (44) | 4.6 (30) |
+| 16  | 5.7 (36) | 0.9 (37) | 5.0 (32) | 3.4 (21) | 1.0 (57) | about as plain |
+| 64  | 6.2 (38) | 0.8 (41) | 5.5 (34) | 6.1 (36) | 1.5 (68) | about as plain |
+
+With three threads a full map appears in about 0.3 s in the fast mode at 4, 16 and 64 blocks per pixel and in
+about 0.9 s at the least favourable zoom. Sampling costs 1.9-2.2 microseconds per pixel for Tectonic (biome and
+height together; a separate height pass would add 1.3-1.8).
+
+Verified against the real game: relief maps rendered by this build were rebuilt independently from the game's own
+heights and biomes with the rules above; 99.97-99.99% of the pixels agree in each of six maps (mod and datapack,
+1 to 64 blocks per pixel, both resolutions), the rest being the biome ties mentioned below.
 
 ### What is exact, what is not
 
@@ -68,8 +121,8 @@ cannot disturb existing sessions. Session files written with Tectonic on contain
 * **Unverified**: structures, spawn, strongholds, slime chunks and all search conditions. They use vanilla placement
   logic; with Tectonic on, their biome checks see Tectonic's biomes, but terrain checks and conditions that read the
   climate noise directly still use vanilla noise. Treat structure positions in a Tectonic world as hints.
-* **Missing**: the real surface (3D terrain), other Tectonic versions and non-default mod configs, and biomes added
-  by other mods.
+* **Missing**: the real surface (3D terrain), other Tectonic versions and non-default mod configs, biomes added
+  by other mods, and relief for the Nether and the End.
 
 
 ## Download

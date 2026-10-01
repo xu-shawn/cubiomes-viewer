@@ -244,10 +244,18 @@ void reliefRender(unsigned char *rgb, const int *biomes, const float *heights,
             int bmin = std::min(std::min(q[-1], q[1]), std::min(q[-iw], q[iw]));
             const int bmin2 = std::min(bmin, std::min(std::min(q[-2], q[2]), std::min(q[-2*iw], q[2*iw])));
             // a line is drawn on the upper side of every level that is crossed between neighbours
-            const bool line = b0 > bmin;
-            const bool index = floordiv5(b0) > floordiv5(bmin2); // every fifth level, two pixels wide
+            bool line = b0 > bmin;
+            bool index = floordiv5(b0) > floordiv5(bmin2); // every fifth level, two pixels wide
             // sea level; far out every pond would get an outline, so it is left to the biome colours there
             const bool coast = hassea && bpp <= 8 && b0 >= 0 && bmin < 0;
+            if (hassea && bpp > 8 && b0 >= 0 && bmin2 < 0)
+                line = index = false;
+            // samples 64 blocks apart and more no longer trace a line: only the index contours
+            // remain, and from 256 blocks on the shading alone
+            if (scale >= 64)
+                line = false;
+            if (scale >= 256)
+                index = false;
             // contour levels crossed per pixel: above 0.4 the lines would merge
             const float dens = sp * inv;
 
