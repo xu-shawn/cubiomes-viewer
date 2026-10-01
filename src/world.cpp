@@ -171,7 +171,7 @@ void getStructs(std::vector<VarPos> *out, const StructureConfig sconf,
     Generator g;
     if (!nogen)
     {
-        setupGenerator(&g, wi.mc, wi.large);
+        setupGenerator(&g, wi.mc, wi.genFlags());
         applySeed(&g, dim, wi.seed);
     }
 
@@ -248,6 +248,23 @@ static float cubic_hermite(float p[4], float u)
     return a + b*u + c*u*u + d*u*u*u;
 }
 
+// Hypsometric tint (height in blocks -> colour), the palette of the Tectonic explorer.
+static void hypsoTint(float h, float rgb[3])
+{
+    static const float stops[][4] = {
+        {-64, 8, 20, 60}, {20, 20, 50, 120}, {62, 60, 110, 190}, {63, 190, 180, 130}, {75, 90, 150, 70},
+        {110, 60, 120, 55}, {140, 130, 125, 80}, {170, 120, 100, 85}, {200, 150, 145, 140}, {230, 225, 225, 230},
+        {320, 255, 255, 255}};
+    const int n = sizeof(stops) / sizeof(stops[0]);
+    int k = 0;
+    while (k < n - 2 && h >= stops[k+1][0])
+        k++;
+    float f = (h - stops[k][0]) / (stops[k+1][0] - stops[k][0]);
+    f = f < 0 ? 0 : (f > 1 ? 1 : f);
+    for (int c = 0; c < 3; c++)
+        rgb[c] = stops[k][c+1] + f * (stops[k+1][c+1] - stops[k][c+1]);
+}
+
 void applyHeightShading(unsigned char *rgb, Range r,
         const Generator *g, const SurfaceNoise *sn, int stepbits, int mode,
         bool bicubic, const std::atomic_bool *abort)
@@ -266,63 +283,77 @@ void applyHeightShading(unsigned char *rgb, Range r,
         px -= bd; pz -= bd;
         pw += 2*bd; ph += 2*bd;
     }
-    std::vector<float> buf(pw * ph);
-    if (ps == 0 && r.scale <= 8 && g->dim == DIM_END)
-    {
-        mapEndSurfaceHeight(&buf[0], &g->en, sn, px, pz, pw, ph, r.scale, 0);
-        mapEndIslandHeight(&buf[0], &g->en, g->seed, px, pz, pw, ph, r.scale);
-    }
-    else if (ps == 0 && r.scale == 4)
-    {
-        mapApproxHeight(&buf[0], 0, g, sn, px, pz, pw, ph);
-    }
-    else
-    {
-        for (int j = 0; j < ph; j++)
+    std::vector<float> height((w+2) * (h+2));
+    if (g->dim == DIM_OVERWORLD && (g->flags & TECTONIC_ANY))
+    {   // Tectonic's base surface is cheap and exact at every block: no 1:4 sampling and interpolation
+        for (int j = 0; j < h+2; j++)
         {
-            for (int i = 0; i < pw; i++)
+            for (int i = 0; i < w+2; i++)
             {
                 if (abort && *abort) return;
-                int samplex = (((px + i) << ps)) * r.scale / 4;
-                int samplez = (((pz + j) << ps)) * r.scale / 4;
-                float y = 0;
-                mapApproxHeight(&y, 0, g, sn, samplex, samplez, 1, 1);
-                buf[j*pw+i] = y;
+                height[j*(w+2)+i] = getTectonicHeight(&g->tn, (x + i - 1) * r.scale, (z + j - 1) * r.scale);
             }
         }
     }
-
-    // interpolate height
-    std::vector<float> height((w+2) * (h+2));
-    for (int j = 0; j < h+2; j++)
+    else
     {
-        for (int i = 0; i < w+2; i++)
+        std::vector<float> buf(pw * ph);
+        if (ps == 0 && r.scale <= 8 && g->dim == DIM_END)
         {
-            if (abort && *abort) return;
-            int pi = ((x + i - 1) >> ps) - px - bd;
-            int pj = ((z + j - 1) >> ps) - pz - bd;
-            float di = ((x + i - 1) & st) / (float)(st + 1);
-            float dj = ((z + j - 1) & st) / (float)(st + 1);
-            float v = 0;
-            if (bicubic)
+            mapEndSurfaceHeight(&buf[0], &g->en, sn, px, pz, pw, ph, r.scale, 0);
+            mapEndIslandHeight(&buf[0], &g->en, g->seed, px, pz, pw, ph, r.scale);
+        }
+        else if (ps == 0 && r.scale == 4)
+        {
+            mapApproxHeight(&buf[0], 0, g, sn, px, pz, pw, ph);
+        }
+        else
+        {
+            for (int j = 0; j < ph; j++)
             {
-                float p[] = {
-                    cubic_hermite(&buf.at((pj+0)*pw + pi), di),
-                    cubic_hermite(&buf.at((pj+1)*pw + pi), di),
-                    cubic_hermite(&buf.at((pj+2)*pw + pi), di),
-                    cubic_hermite(&buf.at((pj+3)*pw + pi), di),
-                };
-                v = cubic_hermite(p, dj);
+                for (int i = 0; i < pw; i++)
+                {
+                    if (abort && *abort) return;
+                    int samplex = (((px + i) << ps)) * r.scale / 4;
+                    int samplez = (((pz + j) << ps)) * r.scale / 4;
+                    float y = 0;
+                    mapApproxHeight(&y, 0, g, sn, samplex, samplez, 1, 1);
+                    buf[j*pw+i] = y;
+                }
             }
-            else // bilinear
+        }
+
+        // interpolate height
+        for (int j = 0; j < h+2; j++)
+        {
+            for (int i = 0; i < w+2; i++)
             {
-                float v00 = buf.at((pj+0)*pw + pi+0);
-                float v01 = buf.at((pj+0)*pw + pi+1);
-                float v10 = buf.at((pj+1)*pw + pi+0);
-                float v11 = buf.at((pj+1)*pw + pi+1);
-                v = lerp2(di, dj, v00, v01, v10, v11);
+                if (abort && *abort) return;
+                int pi = ((x + i - 1) >> ps) - px - bd;
+                int pj = ((z + j - 1) >> ps) - pz - bd;
+                float di = ((x + i - 1) & st) / (float)(st + 1);
+                float dj = ((z + j - 1) & st) / (float)(st + 1);
+                float v = 0;
+                if (bicubic)
+                {
+                    float p[] = {
+                        cubic_hermite(&buf.at((pj+0)*pw + pi), di),
+                        cubic_hermite(&buf.at((pj+1)*pw + pi), di),
+                        cubic_hermite(&buf.at((pj+2)*pw + pi), di),
+                        cubic_hermite(&buf.at((pj+3)*pw + pi), di),
+                    };
+                    v = cubic_hermite(p, dj);
+                }
+                else // bilinear
+                {
+                    float v00 = buf.at((pj+0)*pw + pi+0);
+                    float v01 = buf.at((pj+0)*pw + pi+1);
+                    float v10 = buf.at((pj+1)*pw + pi+0);
+                    float v11 = buf.at((pj+1)*pw + pi+1);
+                    v = lerp2(di, dj, v00, v01, v10, v11);
+                }
+                height[j*(w+2)+i] = v;
             }
-            height[j*(w+2)+i] = v;
         }
     }
     if (abort && *abort) return;
@@ -346,6 +377,29 @@ void applyHeightShading(unsigned char *rgb, Range r,
             float d1 = t12 + t21;
             float light = 1.0;
             uchar *col = rgb + 3*(j*w + i);
+            if (mode == HV_HYPSO || mode == HV_HYPSO_MOUNTAINS)
+            {
+                const float sea = 63, mountain = 150;
+                float c[3];
+                hypsoTint(t11, c);
+                if (t11 >= sea)
+                {   // relief, lit from the north-west; exaggerated beyond 32 blocks per pixel
+                    float cell = 2 * (r.scale < 32 ? r.scale : 32);
+                    float gx = (t12 - t10) / cell, gz = (t21 - t01) / cell;
+                    float s = 1 + 2.5 * (-gx - gz) / sqrt(1 + 6 * (gx*gx + gz*gz));
+                    s = s < 0.45 ? 0.45 : (s > 1.5 ? 1.5 : s);
+                    for (int k = 0; k < 3; k++)
+                        c[k] *= s;
+                }
+                if (mode == HV_HYPSO_MOUNTAINS && t11 >= mountain &&
+                    !(t01 >= mountain && t10 >= mountain && t12 >= mountain && t21 >= mountain))
+                {
+                    c[0] = 255; c[1] = 30; c[2] = 30;
+                }
+                for (int k = 0; k < 3; k++)
+                    col[k] = (c[k] <= 0) ? 0 : (c[k] > 0xff) ? 0xff : (uchar)(c[k]);
+                continue;
+            }
             if (mode == HV_GRAYSCALE)
             {
                 if (t11 <= -64)
@@ -438,7 +492,11 @@ void Quad::run()
         biomes = allocCache(g, r);
         if (!biomes) return;
 
-        int err = genBiomes(g, biomes, r);
+        int err = 0;
+        if (lopt.mode == LOPT_HEIGHT && lopt.disp[lopt.mode] >= HV_HYPSO)
+            memset(biomes, 0, sizeof(int) * w * h); // tints depend on the height only
+        else
+            err = genBiomes(g, biomes, r);
         if (err)
         {
             fprintf(
@@ -540,12 +598,12 @@ void Level::init4map(QWorld *w, int pix, int layerscale)
 
     if (lopt.mode == LOPT_RIVER_4 && wi.mc >= MC_1_13 && wi.mc <= MC_1_17)
     {
-        setupGenerator(&g, wi.mc, wi.large);
+        setupGenerator(&g, wi.mc, wi.genFlags());
         g.ls.entry_4 = &g.ls.layers[L_RIVER_MIX_4];
     }
     else if (lopt.mode == LOPT_OCEAN_256 && wi.mc >= MC_1_13 && wi.mc <= MC_1_17)
     {
-        setupGenerator(&g, wi.mc, wi.large);
+        setupGenerator(&g, wi.mc, wi.genFlags());
         g.ls.entry_256 = &g.ls.layers[L_OCEAN_TEMP_256];
     }
     else if (lopt.mode == LOPT_NOOCEAN_1 && wi.mc <= MC_B1_7)
@@ -554,7 +612,7 @@ void Level::init4map(QWorld *w, int pix, int layerscale)
     }
     else
     {
-        setupGenerator(&g, wi.mc, wi.large | FORCE_OCEAN_VARIANTS);
+        setupGenerator(&g, wi.mc, wi.genFlags() | FORCE_OCEAN_VARIANTS);
     }
 
     applySeed(&g, dim, wi.seed);
@@ -764,7 +822,7 @@ QWorld::QWorld(WorldInfo wi, int dim, LayerOpt lopt)
     , selvp(Pos{0,0}, -1)
     , qual()
 {
-    setupGenerator(&g, wi.mc,  wi.large);
+    setupGenerator(&g, wi.mc, wi.genFlags());
 
     memlimit = 256ULL * 1024*1024;
     for (MapWorker& w : workers)
@@ -812,7 +870,13 @@ void QWorld::setDim(int dim, LayerOpt lopt)
     initSurfaceNoise(&sn, dim, g.seed);
 
     int pixs, lcnt;
-    if (lopt.mode == LOPT_HEIGHT)
+    if (dim == DIM_OVERWORLD && wi.isTectonic())
+    {   // Tectonic's base surface and climate are cheap to evaluate: full resolution
+        pixs = 128;
+        lcnt = 6;
+        qual = 1.0;
+    }
+    else if (lopt.mode == LOPT_HEIGHT)
     {
         pixs = 32;
         lcnt = 6;
@@ -895,7 +959,12 @@ QString QWorld::getBiomeName(Pos p)
         return c + "=" + QString::number(id);
     }
     QString ret = getBiomeDisplay(wi.mc, id);
-    if (lopt.mode == LOPT_HEIGHT)
+    if (dim == DIM_OVERWORLD && wi.isTectonic())
+    {   // exact base surface height of this block column
+        float h = getTectonicHeight(&g.tn, p.x, p.z);
+        ret = QString::asprintf("base Y %.1f ", h) + ret;
+    }
+    else if (lopt.mode == LOPT_HEIGHT)
     {
         int y = estimateSurface(p);
         if (y > 0)
@@ -1081,7 +1150,7 @@ struct SpawnStronghold : public Scheduled
     void run()
     {
         Generator g;
-        setupGenerator(&g, wi.mc, wi.large);
+        setupGenerator(&g, wi.mc, wi.genFlags());
         applySeed(&g, 0, wi.seed);
 
         Pos *p = new Pos;

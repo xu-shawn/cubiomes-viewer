@@ -25,6 +25,8 @@ bool getLayerOptionInfo(LayerOptInfo *info, int mode, int disp, WorldInfo wi)
         if (disp == 1) txt = QApplication::translate("LayerDialog", "Shaded biome map");
         if (disp == 2) txt = QApplication::translate("LayerDialog", "Contours on biomes");
         if (disp == 3) txt = QApplication::translate("LayerDialog", "Shaded with contours");
+        if (disp == 4) txt = QApplication::translate("LayerDialog", "Hypsometric tints");
+        if (disp == 5) txt = QApplication::translate("LayerDialog", "Tints + outline Y>=150");
         break;
     case LOPT_NOISE_T_4: nptype = NP_TEMPERATURE; break;
     case LOPT_NOISE_H_4: nptype = NP_HUMIDITY; break;

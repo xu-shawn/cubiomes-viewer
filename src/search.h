@@ -719,7 +719,8 @@ struct SearchThreadEnv
     SearchThreadEnv();
     ~SearchThreadEnv();
 
-    QString init(int mc, bool large, const ConditionTree& condtree);
+    // genflags: flags for setupGenerator() (WorldInfo::genFlags())
+    QString init(int mc, uint32_t genflags, const ConditionTree& condtree);
 
     void setSeed(uint64_t seed);
     void init4Dim(int dim);

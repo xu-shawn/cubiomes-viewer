@@ -269,18 +269,15 @@ SearchThreadEnv::~SearchThreadEnv()
         lua_close(it.second);
 }
 
-QString SearchThreadEnv::init(int mc, bool large, const ConditionTree& condtree)
+QString SearchThreadEnv::init(int mc, uint32_t genflags, const ConditionTree& condtree)
 {
     this->condtree = condtree;
     this->mc = mc;
-    this->large = large;
+    this->large = (genflags & LARGE_BIOMES) != 0;
     this->seed = 0;
     this->surfdim = DIM_UNDEF;
     this->octaves = 0;
-    uint32_t flags = 0;
-    if (large)
-        flags |= LARGE_BIOMES;
-    setupGenerator(&g, mc, flags);
+    setupGenerator(&g, mc, genflags);
 
     QMap<uint64_t, QString> scripts;
     getScripts(scripts);

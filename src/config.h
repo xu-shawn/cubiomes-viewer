@@ -2,6 +2,13 @@
 #define CONFIG_H
 
 #include "cubiomes/finders.h"
+#include "cubiomes/features/end_city.h"
+#include "cubiomes/features/fortress.h"
+#include "cubiomes/tectonic.h"
+
+// structure configuration with the user's salt overrides applied (main.cpp);
+// it is registered with the library through setStructureConfigProvider()
+extern "C" int getStructureConfig_override(int stype, int mc, StructureConfig *sconf);
 
 #include <QSettings>
 #include <QString>
@@ -11,7 +18,9 @@
 #include <vector>
 
 
-#define APP_STRING "cubiomes-viewer"
+// This build keeps its settings and sessions apart from a regular Cubiomes Viewer installation
+// (~/.config/cubiomes-viewer-tectonic instead of ~/.config/cubiomes-viewer).
+#define APP_STRING "cubiomes-viewer-tectonic"
 
 #define PRECOMPUTE48_BUFSIZ ((int64_t)1 << 30)
 
@@ -43,12 +52,26 @@ extern qreal g_iconscale;
 extern ExtGenConfig g_extgen;
 
 
+// Overworld terrain of the Tectonic mod instead of vanilla (cubiomes/tectonic.h); needs MC 26.3
+enum { TECT_OFF = 0, TECT_MOD = 1, TECT_DATAPACK = 2 };
+
 struct WorldInfo
 {
     int mc;
     bool large;
+    int tectonic;
     uint64_t seed;
     int y;
+
+    // flags for setupGenerator()
+    uint32_t genFlags() const
+    {
+        uint32_t flags = large ? LARGE_BIOMES : 0;
+        if (tectonic == TECT_MOD && mc == MC_26_3) flags |= TECTONIC_MOD;
+        if (tectonic == TECT_DATAPACK && mc == MC_26_3) flags |= TECTONIC_DATAPACK;
+        return flags;
+    }
+    bool isTectonic() const { return genFlags() & TECTONIC_ANY; }
 
     WorldInfo() { reset(); }
 

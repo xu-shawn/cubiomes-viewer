@@ -63,11 +63,13 @@ CONFIG(debug, debug|release): {
     CUTARGET = release
 }
 
-# compile cubiomes
+# compile cubiomes (xpple's fork with Tectonic terrain; it is built with CMake)
 CUPATH              = $$PWD/cubiomes
-QMAKE_PRE_LINK      += $(MAKE) -C $$CUPATH -f $$CUPATH/makefile CC=\"$$QMAKE_CC\" CFLAGS=\"$(CFLAGS) $$QMAKE_CFLAGS\" $$CUTARGET
-QMAKE_CLEAN         += $$CUPATH/*.o $$CUPATH/libcubiomes.a
-LIBS                += $$CUPATH/libcubiomes.a -lm
+CUBUILD             = $$OUT_PWD/cubiomes-lib
+QMAKE_PRE_LINK      += cmake -S $$CUPATH -B $$CUBUILD -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=\"$$QMAKE_CC\" -DCMAKE_C_FLAGS=\"-fwrapv\" > /dev/null \
+                       && cmake --build $$CUBUILD --target cubiomes_static --parallel 3
+QMAKE_CLEAN         += $$CUBUILD/libcubiomes_static.a
+LIBS                += $$CUBUILD/libcubiomes_static.a -lm
 
 LUAPATH = $$PWD/lua/src
 

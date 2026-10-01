@@ -82,6 +82,7 @@ private slots:
     void on_seedEdit_editingFinished();
     void on_seedEdit_textChanged(const QString &arg1);
     void on_checkLarge_toggled();
+    void on_comboTectonic_currentIndexChanged(int idx);
     void on_comboY_currentIndexChanged(int index);
 
     void on_actionSave_triggered();

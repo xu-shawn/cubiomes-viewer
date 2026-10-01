@@ -1,3 +1,4 @@
 [submodule "cubiomes"]
 	path = cubiomes
-	url = https://github.com/Cubitect/cubiomes.git
+	url = https://github.com/xu-shawn/cubiomes.git
+	branch = tectonic

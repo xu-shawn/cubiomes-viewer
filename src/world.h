@@ -36,6 +36,8 @@ enum {
     HV_SHADING          = 1,
     HV_CONTOURS         = 2,
     HV_CONTOURS_SHADING = 3,
+    HV_HYPSO            = 4, // hypsometric tints with relief shading
+    HV_HYPSO_MOUNTAINS  = 5, // same, with an outline around heights >= 150
 };
 void applyHeightShading(unsigned char *rgb, Range r,
         const Generator *g, const SurfaceNoise *sn, int stepbits, int mode,

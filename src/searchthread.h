@@ -80,7 +80,7 @@ public:
 
     int                         searchtype;
     int                         mc;
-    int                         large;
+    uint32_t                    genflags;   // flags for setupGenerator()
     ConditionTree               condtree;
     int                         itemsize;   // number of seeds per search item
     int                         threadcnt;  // numbr of worker threads

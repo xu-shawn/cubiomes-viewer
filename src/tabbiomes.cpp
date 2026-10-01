@@ -18,7 +18,7 @@ void AnalysisBiomes::run()
     stop = false;
 
     Generator g;
-    setupGenerator(&g, wi.mc, wi.large);
+    setupGenerator(&g, wi.mc, wi.genFlags());
 
     for (idx = 0; idx < (long)seeds.size(); idx++)
     {

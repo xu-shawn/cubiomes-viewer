@@ -72,7 +72,7 @@ QString AnalysisLocations::set(WorldInfo wi, const std::vector<Condition>& conds
     this->wi = wi;
     QString err = condtree.set(conds, wi.mc);
     if (err.isEmpty())
-        err = env.init(wi.mc, wi.large, condtree);
+        err = env.init(wi.mc, wi.genFlags(), condtree);
     return err;
 }
 

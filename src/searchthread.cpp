@@ -137,7 +137,7 @@ SearchMaster::SearchMaster(QWidget *parent)
     , env()
     , searchtype()
     , mc()
-    , large()
+    , genflags()
     , condtree()
     , itemsize()
     , threadcnt()
@@ -292,7 +292,7 @@ bool SearchMaster::set(QWidget *widget, const Session& s)
     QString err = condtree.set(s.cv, s.wi.mc);
     if (err.isEmpty())
     {
-        err = env.init(s.wi.mc, s.wi.large, condtree);
+        err = env.init(s.wi.mc, s.wi.genFlags(), condtree);
     }
     if (!err.isEmpty())
     {
@@ -302,7 +302,7 @@ bool SearchMaster::set(QWidget *widget, const Session& s)
 
     this->searchtype = s.sc.searchtype;
     this->mc = s.wi.mc;
-    this->large = s.wi.large;
+    this->genflags = s.wi.genFlags();
     this->itemsize = 1;
     this->threadcnt = s.sc.threads;
     this->slist = s.slist;
@@ -943,7 +943,7 @@ bool SearchWorker::getNextItem()
 void SearchWorker::run()
 {
     Pos origin = {0,0};
-    env.init(master->mc, master->large, master->condtree);
+    env.init(master->mc, master->genflags, master->condtree);
 
     switch (master->searchtype)
     {

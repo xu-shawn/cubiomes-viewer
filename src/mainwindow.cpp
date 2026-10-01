@@ -380,6 +380,9 @@ bool MainWindow::getSeed(WorldInfo *wi, bool applyrand)
     }
 
     wi->large = ui->checkLarge->isChecked();
+    wi->tectonic = ui->comboTectonic->currentIndex();
+    if (wi->tectonic < TECT_OFF || wi->tectonic > TECT_DATAPACK || wi->mc != MC_26_3)
+        wi->tectonic = TECT_OFF; // Tectonic's data is for 26.3
     wi->y = ui->comboY->currentText().section(' ', 0, 0).toInt();
 
     return ok;
@@ -422,10 +425,12 @@ bool MainWindow::setSeed(WorldInfo wi, int dim)
     // temporarily disable UI to prevent recursive setSeed() updates
     ui->comboBoxMC->setEnabled(false);
     ui->checkLarge->setEnabled(false);
+    ui->comboTectonic->setEnabled(false);
     ui->seedEdit->setEnabled(false);
     ui->comboY->setEnabled(false);
 
     ui->checkLarge->setChecked(wi.large);
+    ui->comboTectonic->setCurrentIndex(wi.mc == MC_26_3 ? wi.tectonic : TECT_OFF);
     int i, n = ui->comboY->count();
     for (i = 0; i < n; i++)
         if (ui->comboY->itemText(i).section(' ', 0, 0).toInt() == wi.y)
@@ -440,6 +445,7 @@ bool MainWindow::setSeed(WorldInfo wi, int dim)
 
     ui->comboBoxMC->setEnabled(true);
     ui->checkLarge->setEnabled(wi.mc >= MC_1_3);
+    ui->comboTectonic->setEnabled(true);
     ui->seedEdit->setEnabled(true);
     ui->comboY->setEnabled(true);
 
@@ -797,6 +803,19 @@ void MainWindow::on_checkLarge_toggled()
 {
     if (ui->checkLarge->isEnabled())
         updateMapSeed();
+}
+void MainWindow::on_comboTectonic_currentIndexChanged(int idx)
+{
+    if (!ui->comboTectonic->isEnabled())
+        return;
+    if (idx != TECT_OFF && ui->comboBoxMC->currentText() != mc2str(MC_26_3))
+    {   // Tectonic's data is for 26.3: switch the version, which updates the map
+        if (ui->comboBoxMC->findText(mc2str(MC_26_3)) < 0)
+            ui->comboBoxMC->addItem(mc2str(MC_26_3));
+        ui->comboBoxMC->setCurrentText(mc2str(MC_26_3));
+        return;
+    }
+    updateMapSeed();
 }
 void MainWindow::on_comboY_currentIndexChanged(int)
 {

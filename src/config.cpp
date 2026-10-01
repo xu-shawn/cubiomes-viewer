@@ -55,13 +55,14 @@ void ExtGenConfig::save(QSettings& settings)
 
 bool WorldInfo::equals(const WorldInfo& wi) const
 {
-    return mc == wi.mc && large == wi.large && seed == wi.seed && y == wi.y;
+    return mc == wi.mc && large == wi.large && tectonic == wi.tectonic && seed == wi.seed && y == wi.y;
 }
 
 void WorldInfo::reset()
 {
     mc = MC_DEFAULT;
     large = false;
+    tectonic = TECT_OFF;
     seed = 0;
     y = 255;
 }
@@ -70,6 +71,9 @@ void WorldInfo::load(QSettings& settings)
 {
     mc = settings.value("map/mc", mc).toInt();
     large = settings.value("map/large", large).toBool();
+    tectonic = settings.value("map/tectonic", tectonic).toInt();
+    if (tectonic < TECT_OFF || tectonic > TECT_DATAPACK)
+        tectonic = TECT_OFF;
     seed = settings.value("map/seed", (qlonglong)seed).toLongLong();
     y = settings.value("map/y", y).toInt();
 }
@@ -78,6 +82,7 @@ void WorldInfo::save(QSettings& settings)
 {
     settings.setValue("map/mc", mc);
     settings.setValue("map/large", large);
+    settings.setValue("map/tectonic", tectonic);
     settings.setValue("map/seed", (qlonglong)seed);
     settings.setValue("map/y", y);
 }
@@ -100,6 +105,11 @@ bool WorldInfo::read(const QString& line)
         large = tmp;
         return true;
     }
+    if (sscanf(p, "#Tectonic: %d", &tmp) == 1)
+    {
+        tectonic = (tmp >= TECT_OFF && tmp <= TECT_DATAPACK) ? tmp : TECT_OFF;
+        return true;
+    }
     return false;
 }
 
@@ -107,6 +117,8 @@ void WorldInfo::write(QTextStream& stream)
 {
     stream << "#MC:       " << mc2str(mc) << "\n";
     stream << "#Large:    " << large << "\n";
+    if (tectonic)
+        stream << "#Tectonic: " << tectonic << "\n";
     stream.flush();
 }
 

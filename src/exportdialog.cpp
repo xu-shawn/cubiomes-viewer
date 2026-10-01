@@ -24,7 +24,7 @@ void ExportWorker::runWorkItem(const ExportWorkItem& work)
         return;
 
     Generator g;
-    setupGenerator(&g, mt->wi.mc, mt->wi.large | FORCE_OCEAN_VARIANTS);
+    setupGenerator(&g, mt->wi.mc, mt->wi.genFlags() | FORCE_OCEAN_VARIANTS);
     applySeed(&g, mt->dim, work.seed);
     Range r = {mt->scale, mt->x, mt->z, mt->w, mt->h, mt->y, 1};
 
@@ -294,6 +294,7 @@ void ExportDialog::update()
     if (dim == 0) {
         wgen += tr("Overworld");
         if (wi.large) wgen += tr("/large");
+        if (wi.isTectonic()) wgen += (wi.tectonic == TECT_MOD ? "/tectonic-3.0.31" : "/tectonic-dp-3.0.29");
     } else if (dim == -1) {
         wgen += tr("Nether");
     } else if (dim == +1) {

@@ -3,7 +3,7 @@
  <class>MainWindow</class>
  <widget class="QMainWindow" name="MainWindow">
   <property name="windowTitle">
-   <string>Cubiomes Viewer</string>
+   <string>Cubiomes Viewer (Tectonic build)</string>
   </property>
   <property name="windowIcon">
    <iconset resource="../rc/icons.qrc">
@@ -50,6 +50,38 @@
           <property name="topMargin">
            <number>9</number>
           </property>
+          <item row="2" column="0">
+           <widget class="QLabel" name="labelTectonic">
+            <property name="toolTip">
+             <string>Overworld terrain generator. Tectonic needs Minecraft 26.3.</string>
+            </property>
+            <property name="text">
+             <string>Terrain</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="1" colspan="7">
+           <widget class="StyledComboBox" name="comboTectonic">
+            <property name="toolTip">
+             <string>Overworld terrain generator. With Tectonic the biome map, the height layer and the height readout show the Tectonic mod's world (base surface height). Selecting it switches to Minecraft 26.3. Structures are not verified for Tectonic.</string>
+            </property>
+            <item>
+             <property name="text">
+              <string>Vanilla</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Tectonic 3.0.31 (mod, default config)</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Tectonic 3.0.29 (datapack)</string>
+             </property>
+            </item>
+           </widget>
+          </item>
           <item row="1" column="0" colspan="2">
            <widget class="QCheckBox" name="checkLarge">
             <property name="text">
