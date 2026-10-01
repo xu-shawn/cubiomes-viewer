@@ -42,6 +42,11 @@ enum {
 void applyHeightShading(unsigned char *rgb, Range r,
         const Generator *g, const SurfaceNoise *sn, int stepbits, int mode,
         bool bicubic, const std::atomic_bool *abort);
+// Surface heights of the pixels of r plus a border, (r.sx+2*border) x (r.sz+2*border).
+// Returns false if the generator provides no height here or on abort.
+bool sampleSurfaceHeights(std::vector<float>& height, int border, Range r,
+        const Generator *g, const SurfaceNoise *sn, int stepbits,
+        bool bicubic, const std::atomic_bool *abort);
 
 struct Scheduled : public QRunnable
 {
@@ -61,6 +66,8 @@ struct Quad : public Scheduled
 
     void run();
     void updateBiomeColor();
+    // relief: render the image again at k image pixels per sample (GUI thread, finished tiles only)
+    void renderRelief(int k);
 
     WorldInfo wi;
     int dim;
@@ -77,6 +84,9 @@ struct Quad : public Scheduled
 
     int *biomes;
     uchar *rgb;
+    float *heights; // relief: surface heights with a border of RELIEF_BORDER samples
+    int imgk;       // relief: image pixels per sample
+    const std::atomic<float> *viewb2p; // current zoom of the view (screen pixels per block)
 
     // img and spos act as an atomic gate (with NULL or non-NULL indicating available results)
     QAtomicPointer<QImage> img;
@@ -112,6 +122,7 @@ struct Level
     int sopt;
     double vis;
     std::atomic_bool *isdel;
+    const std::atomic<float> *viewb2p;
 };
 
 struct PosElement
@@ -211,6 +222,10 @@ public:
     QVector<Pos> endgates;
     // isdel is a flag for the worker thread to stop
     std::atomic_bool isdel;
+    // zoom of the last draw; new relief tiles render their image for it
+    std::atomic<float> viewb2p;
+    // relief tiles are still waiting to be rendered again for the current zoom
+    bool reliefpending;
 
     // slime overlay (pixel chunks)
     QImage slimeimg;

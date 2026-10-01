@@ -105,6 +105,8 @@ private slots:
     void on_actionScreenshot_triggered();
     void on_actionDock_triggered();
     void on_actionLayerDisplay_triggered();
+    void onReliefToggled(bool on);
+    void onReliefOptions();
 
     void on_tabContainer_currentChanged(int index);
     void on_tabContainerSearch_currentChanged(int index);
@@ -148,6 +150,7 @@ public:
 
     QVector<QAction*> laction;
     QVector<QAction*> saction;
+    QAction *actRelief;
     QAction *acthome;
     QAction *actzoom[2];
     QAction *dimactions[3];

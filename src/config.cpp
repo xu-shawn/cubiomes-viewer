@@ -122,10 +122,47 @@ void WorldInfo::write(QTextStream& stream)
     stream.flush();
 }
 
+void ReliefOpt::reset()
+{
+    enabled = false;
+    interval = 0;
+    shading = true;
+    strength = 75;
+    detail = 0;
+}
+
+void ReliefOpt::load(QSettings& settings)
+{
+    enabled = settings.value("map/relief", enabled).toBool();
+    interval = settings.value("map/reliefInterval", interval).toInt();
+    shading = settings.value("map/reliefShading", shading).toBool();
+    strength = settings.value("map/reliefStrength", strength).toInt();
+    detail = settings.value("map/reliefDetail", detail).toInt();
+    if (interval < 0 || interval > 256) interval = 0;
+    if (strength < 0 || strength > 100) strength = 75;
+    if (detail < 0 || detail > 1) detail = 0;
+}
+
+void ReliefOpt::save(QSettings& settings)
+{
+    settings.setValue("map/relief", enabled);
+    settings.setValue("map/reliefInterval", interval);
+    settings.setValue("map/reliefShading", shading);
+    settings.setValue("map/reliefStrength", strength);
+    settings.setValue("map/reliefDetail", detail);
+}
+
+bool ReliefOpt::equals(const ReliefOpt& o) const
+{
+    return enabled == o.enabled && interval == o.interval && shading == o.shading &&
+        strength == o.strength && detail == o.detail;
+}
+
 void LayerOpt::reset()
 {
     mode = LOPT_BIOMES;
     memset(disp, 0, sizeof(disp));
+    relief.reset();
 }
 
 int LayerOpt::activeDisp() const
@@ -135,7 +172,11 @@ int LayerOpt::activeDisp() const
 
 bool LayerOpt::activeDifference(const LayerOpt& l) const
 {
-    return mode != l.mode || disp[l.mode] != l.disp[l.mode];
+    if (mode != l.mode || disp[l.mode] != l.disp[l.mode])
+        return true;
+    if (mode == LOPT_BIOMES && (relief.enabled || l.relief.enabled) && !relief.equals(l.relief))
+        return true;
+    return false;
 }
 
 bool LayerOpt::isClimate(int mc) const

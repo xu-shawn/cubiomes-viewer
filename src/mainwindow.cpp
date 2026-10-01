@@ -37,6 +37,15 @@
 #include <QStandardPaths>
 #include <QTreeWidget>
 #include <QTranslator>
+#include <QCheckBox>
+#include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QFormLayout>
+#include <QLabel>
+#include <QPainter>
+#include <QPushButton>
+#include <QSlider>
 
 #if WITH_DBUS
 #include <QDBusMessage>
@@ -125,6 +134,32 @@ MainWindow::MainWindow(QString sessionpath, QString resultspath, QWidget *parent
         act->setActionGroup(grp);
     }
     connect(mapView, &MapView::layerChange, this, &MainWindow::onActionBiomeLayerSelect);
+
+    {   // relief view: a toggle for the biome layer, with its options below it
+        QPixmap pix(32, 32);
+        pix.fill(Qt::transparent);
+        QPainter p(&pix);
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setPen(QPen(QColor(40, 40, 40), 2.5));
+        p.drawEllipse(QRectF(3, 6, 26, 21));
+        p.setPen(QPen(QColor(235, 235, 235), 2.2));
+        p.drawEllipse(QRectF(8, 10, 16, 12.5));
+        p.setPen(QPen(QColor(40, 40, 40), 2.2));
+        p.drawEllipse(QRectF(13, 13.5, 6, 5));
+        p.end();
+        actRelief = new QAction(QIcon(pix), tr("Relief contours"), this);
+        actRelief->setCheckable(true);
+        actRelief->setShortcut(QKeySequence(Qt::CTRL + Qt::SHIFT + Qt::Key_R));
+        actRelief->setToolTip(tr(
+            "Relief: draw illuminated contour lines of the surface height on the biome map (Ctrl+Shift+R).\n"
+            "With Tectonic the height is the base surface; the peaks on top of it are not included."));
+        QAction *actopt = new QAction(tr("Relief options..."), this);
+        ui->menuLayer->addSeparator();
+        ui->menuLayer->addAction(actRelief);
+        ui->menuLayer->addAction(actopt);
+        connect(actRelief, &QAction::toggled, this, &MainWindow::onReliefToggled);
+        connect(actopt, &QAction::triggered, this, &MainWindow::onReliefOptions);
+    }
     for (int i = 0; i <= 9; i++)
     {
         QAction *act = new QAction(this);
@@ -160,6 +195,8 @@ MainWindow::MainWindow(QString sessionpath, QString resultspath, QWidget *parent
         dimgroup->addAction(dimactions[i]);
     }
     dimactions[0]->setChecked(true);
+    ui->toolBar->addSeparator();
+    ui->toolBar->addAction(actRelief);
 
     saction.resize(D_STRUCT_NUM);
     addMapAction(D_GRID);
@@ -489,6 +526,7 @@ void MainWindow::saveSettings()
     WorldInfo wi;
     getSeed(&wi, false);
     wi.save(settings);
+    lopt.relief.save(settings);
     settings.setValue("map/dim", getDim());
     settings.setValue("map/x", getMapView()->getX());
     settings.setValue("map/z", getMapView()->getZ());
@@ -555,6 +593,11 @@ void MainWindow::loadSettings()
 
     g_extgen.load(settings);
     setMCList(g_extgen.experimentalVers);
+
+    lopt.relief.load(settings);
+    actRelief->blockSignals(true);
+    actRelief->setChecked(lopt.relief.enabled);
+    actRelief->blockSignals(false);
 
     WorldInfo wi;
     // NOTE: version can be wrong when the mc-enum changes, but the session file should correct it
@@ -1052,7 +1095,9 @@ void MainWindow::on_actionLayerDisplay_triggered()
     LayerDialog *dialog = new LayerDialog(this, wi);
     dialog->setLayerOptions(lopt);
     connect(dialog, &LayerDialog::apply, [=](){
+        ReliefOpt relief = lopt.relief; // not part of this dialog
         lopt = dialog->getLayerOptions();
+        lopt.relief = relief;
         laction[lopt.mode]->setChecked(true);
         updateMapSeed();
     });
@@ -1111,6 +1156,90 @@ void MainWindow::onActionMapToggled(int sopt, bool show)
     if (sopt == D_PORTAL) // overworld portals should also control nether
         getMapView()->setShow(D_PORTALN, show);
     getMapView()->setShow(sopt, show);
+}
+
+void MainWindow::onReliefToggled(bool on)
+{
+    if (lopt.relief.enabled == on)
+        return;
+    lopt.relief.enabled = on;
+    if (on && lopt.mode != LOPT_BIOMES)
+    {   // relief is a view of the biome layer
+        laction[LOPT_BIOMES]->setChecked(true);
+        if (lopt.mode == LOPT_BIOMES)
+            return; // the layer change updated the map
+        lopt.mode = LOPT_BIOMES;
+    }
+    updateMapSeed();
+}
+
+void MainWindow::onReliefOptions()
+{
+    QDialog *dialog = new QDialog(this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setWindowTitle(tr("Relief options"));
+    QFormLayout *form = new QFormLayout(dialog);
+
+    QCheckBox *enable = new QCheckBox(tr("Draw relief on the biome map"), dialog);
+    enable->setChecked(lopt.relief.enabled);
+    form->addRow(enable);
+
+    QComboBox *interval = new QComboBox(dialog);
+    interval->addItem(tr("Automatic (follows the zoom)"), 0);
+    for (int iv : {1, 2, 4, 8, 16, 32, 64})
+        interval->addItem(tr("%1 blocks").arg(iv), iv);
+    interval->setCurrentIndex(std::max(0, interval->findData(lopt.relief.interval)));
+    interval->setToolTip(tr("Height difference between two contour lines. Every fifth line is an index contour."));
+    form->addRow(tr("Contour interval:"), interval);
+
+    QCheckBox *shading = new QCheckBox(tr("Soft hillshade under the lines"), dialog);
+    shading->setChecked(lopt.relief.shading);
+    form->addRow(shading);
+
+    QSlider *strength = new QSlider(Qt::Horizontal, dialog);
+    strength->setRange(0, 100);
+    strength->setValue(lopt.relief.strength);
+    form->addRow(tr("Line strength:"), strength);
+
+    QComboBox *detail = new QComboBox(dialog);
+    detail->addItem(tr("Fast (a height sample per 1-4 screen pixels)"), 0);
+    detail->addItem(tr("Fine (a sample per 0.5-2 pixels, about 4x slower)"), 1);
+    detail->setCurrentIndex(lopt.relief.detail ? 1 : 0);
+    form->addRow(tr("Resolution:"), detail);
+
+    QLabel *note = new QLabel(tr(
+        "Lines facing the light in the north-west are drawn lighter, lines facing away darker.\n"
+        "Heights: Tectonic's base surface (without its peaks) or, for vanilla, the\n"
+        "library's surface estimate. Overworld only: the Nether and the End show the plain biome map."), dialog);
+    form->addRow(note);
+
+    QDialogButtonBox *buttons = new QDialogButtonBox(
+        QDialogButtonBox::Ok | QDialogButtonBox::Apply | QDialogButtonBox::Cancel, dialog);
+    form->addRow(buttons);
+
+    auto apply = [=]() {
+        ReliefOpt r = lopt.relief;
+        r.interval = interval->currentData().toInt();
+        r.shading = shading->isChecked();
+        r.strength = strength->value();
+        r.detail = detail->currentIndex();
+        bool on = enable->isChecked();
+        if (on != lopt.relief.enabled)
+        {
+            lopt.relief = r;
+            lopt.relief.enabled = !on;
+            actRelief->setChecked(on); // toggles the view and updates the map
+        }
+        else if (!r.equals(lopt.relief))
+        {
+            lopt.relief = r;
+            updateMapSeed();
+        }
+    };
+    connect(buttons->button(QDialogButtonBox::Apply), &QPushButton::clicked, apply);
+    connect(buttons, &QDialogButtonBox::accepted, [=]() { apply(); dialog->accept(); });
+    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
+    dialog->show();
 }
 
 void MainWindow::onActionBiomeLayerSelect(int mode, int disp)

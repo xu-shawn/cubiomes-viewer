@@ -136,6 +136,7 @@ SOURCES += \
         src/main.cpp \
         src/util.cpp \
         src/widgets.cpp \
+        src/relief.cpp \
         src/world.cpp
 
 HEADERS += \
@@ -202,6 +203,7 @@ HEADERS += \
         src/mainwindow.h \
         src/util.h \
         src/widgets.h \
+        src/relief.h \
         src/world.h
 
 FORMS += \

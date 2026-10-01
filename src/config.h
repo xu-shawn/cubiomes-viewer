@@ -106,10 +106,29 @@ enum {
     LOPT_MAX,
 };
 
+// Relief view of the biome layer: the biome map with illuminated contour lines
+// (and optionally a soft hillshade) derived from the surface height.
+struct ReliefOpt
+{
+    bool enabled;
+    int interval;   // contour interval in blocks, 0 = automatic (follows the zoom)
+    bool shading;   // soft hillshade under the lines
+    int strength;   // line strength in percent
+    int detail;     // 0 = fast (a sample per 1-4 screen pixels), 1 = fine (per 0.5-2)
+
+    ReliefOpt() { reset(); }
+
+    void reset();
+    void load(QSettings& settings);
+    void save(QSettings& settings);
+    bool equals(const ReliefOpt& o) const;
+};
+
 struct LayerOpt
 {
     int8_t mode;
     int8_t disp[LOPT_MAX];
+    ReliefOpt relief;
 
     LayerOpt() { reset(); }
 
@@ -118,6 +137,8 @@ struct LayerOpt
     int activeDisp() const;
     bool activeDifference(const LayerOpt& l) const;
     bool isClimate(int mc) const;
+    // relief is drawn on top of the biome layer only
+    bool reliefActive() const { return relief.enabled && mode == LOPT_BIOMES; }
 };
 
 enum {

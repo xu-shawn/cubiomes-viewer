@@ -1,10 +1,13 @@
 #include "world.h"
+#include "relief.h"
 
 #include "util.h"
 
 #include <QPainterPath>
 #include <QSettings>
 #include <QThreadPool>
+#include <QElapsedTimer>
+#include <QTimer>
 
 #include <algorithm>
 #include <cmath>
@@ -138,7 +141,7 @@ QStringList VarPos::detail() const
 Quad::Quad(const Level* l, int64_t i, int64_t j)
     : wi(l->wi),dim(l->dim),lopt(l->lopt),g(&l->g),sn(&l->sn),highres(l->highres),scale(l->scale)
     , ti(i),tj(j),blocks(l->blocks),pixs(l->pixs),sopt(l->sopt)
-    , biomes(),rgb(),img(),spos()
+    , biomes(),rgb(),heights(),imgk(1),viewb2p(l->viewb2p),img(),spos()
 {
     isdel = l->isdel;
     setAutoDelete(false);
@@ -156,6 +159,7 @@ Quad::~Quad()
     delete img;
     delete spos;
     delete [] rgb;
+    delete [] heights;
 }
 
 void getStructs(std::vector<VarPos> *out, const StructureConfig sconf,
@@ -265,33 +269,36 @@ static void hypsoTint(float h, float rgb[3])
         rgb[c] = stops[k][c+1] + f * (stops[k+1][c+1] - stops[k][c+1]);
 }
 
-void applyHeightShading(unsigned char *rgb, Range r,
-        const Generator *g, const SurfaceNoise *sn, int stepbits, int mode,
+bool sampleSurfaceHeights(std::vector<float>& height, int border, Range r,
+        const Generator *g, const SurfaceNoise *sn, int stepbits,
         bool bicubic, const std::atomic_bool *abort)
 {
     int bd = bicubic ? 1 : 0; // sampling border
     int ps = stepbits; // bits in step size
     int st = (1 << ps) - 1; // step mask
-    // the sampling spans [x-1, x+w+1), reduced to the stepped grid
+    int b = border;
+    // the sampling spans [x-b, x+w+b), reduced to the stepped grid
     int x = r.x, z = r.z, w = r.sx, h = r.sz;
-    int px = ((x-1) >> ps);
-    int pz = ((z-1) >> ps);
-    int pw = ((x+w+2+st) >> ps) - px + 1;
-    int ph = ((z+h+2+st) >> ps) - pz + 1;
+    int tw = w + 2*b, th = h + 2*b;
+    int px = ((x-b) >> ps);
+    int pz = ((z-b) >> ps);
+    int pw = ((x+w+b+1+st) >> ps) - px + 1;
+    int ph = ((z+h+b+1+st) >> ps) - pz + 1;
     if (bd)
     {   // add border for cubic sampling
         px -= bd; pz -= bd;
         pw += 2*bd; ph += 2*bd;
     }
-    std::vector<float> height((w+2) * (h+2));
+    bool ok = true;
+    height.resize(tw * th);
     if (g->dim == DIM_OVERWORLD && (g->flags & TECTONIC_ANY))
     {   // Tectonic's base surface is cheap and exact at every block: no 1:4 sampling and interpolation
-        for (int j = 0; j < h+2; j++)
+        for (int j = 0; j < th; j++)
         {
-            for (int i = 0; i < w+2; i++)
+            for (int i = 0; i < tw; i++)
             {
-                if (abort && *abort) return;
-                height[j*(w+2)+i] = getTectonicHeight(&g->tn, (x + i - 1) * r.scale, (z + j - 1) * r.scale);
+                if (abort && *abort) return false;
+                height[j*tw+i] = getTectonicHeight(&g->tn, (x + i - b) * r.scale, (z + j - b) * r.scale);
             }
         }
     }
@@ -305,7 +312,8 @@ void applyHeightShading(unsigned char *rgb, Range r,
         }
         else if (ps == 0 && r.scale == 4)
         {
-            mapApproxHeight(&buf[0], 0, g, sn, px, pz, pw, ph);
+            if (mapApproxHeight(&buf[0], 0, g, sn, px, pz, pw, ph))
+                ok = false;
         }
         else
         {
@@ -313,26 +321,27 @@ void applyHeightShading(unsigned char *rgb, Range r,
             {
                 for (int i = 0; i < pw; i++)
                 {
-                    if (abort && *abort) return;
+                    if (abort && *abort) return false;
                     int samplex = (((px + i) << ps)) * r.scale / 4;
                     int samplez = (((pz + j) << ps)) * r.scale / 4;
                     float y = 0;
-                    mapApproxHeight(&y, 0, g, sn, samplex, samplez, 1, 1);
+                    if (mapApproxHeight(&y, 0, g, sn, samplex, samplez, 1, 1))
+                        ok = false;
                     buf[j*pw+i] = y;
                 }
             }
         }
 
         // interpolate height
-        for (int j = 0; j < h+2; j++)
+        for (int j = 0; j < th; j++)
         {
-            for (int i = 0; i < w+2; i++)
+            for (int i = 0; i < tw; i++)
             {
-                if (abort && *abort) return;
-                int pi = ((x + i - 1) >> ps) - px - bd;
-                int pj = ((z + j - 1) >> ps) - pz - bd;
-                float di = ((x + i - 1) & st) / (float)(st + 1);
-                float dj = ((z + j - 1) & st) / (float)(st + 1);
+                if (abort && *abort) return false;
+                int pi = ((x + i - b) >> ps) - px - bd;
+                int pj = ((z + j - b) >> ps) - pz - bd;
+                float di = ((x + i - b) & st) / (float)(st + 1);
+                float dj = ((z + j - b) & st) / (float)(st + 1);
                 float v = 0;
                 if (bicubic)
                 {
@@ -352,10 +361,20 @@ void applyHeightShading(unsigned char *rgb, Range r,
                     float v11 = buf.at((pj+1)*pw + pi+1);
                     v = lerp2(di, dj, v00, v01, v10, v11);
                 }
-                height[j*(w+2)+i] = v;
+                height[j*tw+i] = v;
             }
         }
     }
+    return ok;
+}
+
+void applyHeightShading(unsigned char *rgb, Range r,
+        const Generator *g, const SurfaceNoise *sn, int stepbits, int mode,
+        bool bicubic, const std::atomic_bool *abort)
+{
+    int w = r.sx, h = r.sz;
+    std::vector<float> height;
+    sampleSurfaceHeights(height, 1, r, g, sn, stepbits, bicubic, abort);
     if (abort && *abort) return;
     // apply shading based on height changes
     float mul = 0.25 / r.scale;
@@ -452,6 +471,14 @@ void Quad::updateBiomeColor()
             rgb[3*i+0] = rgb[3*i+1] = rgb[3*i+2] = col;
         }
     }
+    else if (heights)
+    {
+        QElapsedTimer timer;
+        timer.start();
+        reliefRender(rgb, biomes, heights, r.sx, r.sz, imgk, scale, lopt.relief, dim, g_biomeColors);
+        g_relief_ns += timer.nsecsElapsed();
+        g_relief_count++;
+    }
     else
     {
         biomesToImage(rgb, g_biomeColors, biomes, r.sx, r.sz, 1, 1);
@@ -466,6 +493,20 @@ void Quad::updateBiomeColor()
             applyHeightShading(rgb, r, g, sn, stepbits, lopt.disp[lopt.mode], false, isdel);
         }
     }
+}
+
+void Quad::renderRelief(int k)
+{
+    if (!heights || !biomes || !done || k == imgk)
+        return;
+    uchar *oldrgb = rgb;
+    QImage *oldimg = img;
+    imgk = k;
+    rgb = new uchar[r.sx*k * r.sz*k * 3];
+    updateBiomeColor();
+    img = new QImage(rgb, r.sx*k, r.sz*k, 3*r.sx*k, QImage::Format_RGB888);
+    delete oldimg;
+    delete [] oldrgb;
 }
 
 void Quad::run()
@@ -489,11 +530,36 @@ void Quad::run()
         int x = ti*pixs, z = tj*pixs, w = pixs, h = pixs;
         r = {scale, x, z, w, h, y, 1};
 
+        if (biomes)
+        {   // an earlier run of this tile was interrupted
+            free(biomes);
+            biomes = nullptr;
+        }
+        delete [] heights;
+        heights = nullptr;
         biomes = allocCache(g, r);
         if (!biomes) return;
 
+        QElapsedTimer timer;
+        timer.start();
+
         int err = 0;
-        if (lopt.mode == LOPT_HEIGHT && lopt.disp[lopt.mode] >= HV_HYPSO)
+        bool sampled = false;
+        if (lopt.reliefActive() && dim == DIM_OVERWORLD)
+        {   // biomes and surface heights in one pass; falls back to the plain map without heights
+            heights = new float[(w + 2*RELIEF_BORDER) * (h + 2*RELIEF_BORDER)];
+            sampled = reliefSampleTile(g, sn, r, biomes, heights, isdel);
+            if (*isdel)
+                return;
+            if (!sampled)
+            {
+                delete [] heights;
+                heights = nullptr;
+            }
+        }
+        if (sampled)
+            ;
+        else if (lopt.mode == LOPT_HEIGHT && lopt.disp[lopt.mode] >= HV_HYPSO)
             memset(biomes, 0, sizeof(int) * w * h); // tints depend on the height only
         else
             err = genBiomes(g, biomes, r);
@@ -509,9 +575,15 @@ void Quad::run()
                 biomes[i] = -1;
         }
 
-        rgb = new uchar[w*h * 3]();
+        if (heights) // image pixels per sample for the current zoom
+            imgk = reliefImageScale((viewb2p ? viewb2p->load() : 1.0f) * scale);
+        rgb = new uchar[w*imgk * h*imgk * 3]();
         updateBiomeColor();
-        img = new QImage(rgb, w, h, 3*w, QImage::Format_RGB888);
+        img = new QImage(rgb, w*imgk, h*imgk, 3*w*imgk, QImage::Format_RGB888);
+
+        g_tile_ns += timer.nsecsElapsed();
+        g_tile_count++;
+        g_tile_samples += w * h;
     }
     else if (pixs < 0)
     {
@@ -535,6 +607,7 @@ Level::Level()
     , tx(),tz(),tw(),th()
     , highres(),scale(),blocks(),pixs()
     , sopt()
+    , viewb2p()
 {
 }
 
@@ -551,6 +624,7 @@ void Level::init4map(QWorld *w, int pix, int layerscale)
     this->lopt = w->lopt;
     this->wi = w->wi;
     this->dim = w->dim;
+    this->viewb2p = &w->viewb2p;
 
     tx = tz = tw = th = 0;
 
@@ -812,6 +886,8 @@ QWorld::QWorld(WorldInfo wi, int dim, LayerOpt lopt)
     , strongholds()
     , qsinfo()
     , isdel()
+    , viewb2p(1.0f)
+    , reliefpending()
     , slimeimg()
     , slimex()
     , slimez()
@@ -870,7 +946,14 @@ void QWorld::setDim(int dim, LayerOpt lopt)
     initSurfaceNoise(&sn, dim, g.seed);
 
     int pixs, lcnt;
-    if (dim == DIM_OVERWORLD && wi.isTectonic())
+    if (lopt.reliefActive() && dim == DIM_OVERWORLD)
+    {   // relief: a sample per 1-4 screen pixels (fast) or per 0.5-2 (fine);
+        // the image is rendered at up to four pixels per sample
+        pixs = 128;
+        lcnt = 6;
+        qual = lopt.relief.detail ? 2.0 : 4.0;
+    }
+    else if (dim == DIM_OVERWORLD && wi.isTectonic())
     {   // Tectonic's base surface and climate are cheap to evaluate: full resolution
         pixs = 128;
         lcnt = 6;
@@ -964,7 +1047,7 @@ QString QWorld::getBiomeName(Pos p)
         float h = getTectonicHeight(&g.tn, p.x, p.z);
         ret = QString::asprintf("base Y %.1f ", h) + ret;
     }
-    else if (lopt.mode == LOPT_HEIGHT)
+    else if (lopt.mode == LOPT_HEIGHT || (lopt.reliefActive() && dim == DIM_OVERWORLD))
     {
         int y = estimateSurface(p);
         if (y > 0)
@@ -1227,6 +1310,14 @@ void QWorld::draw(QPainter& painter, int vw, int vh, qreal focusx, qreal focusz,
             break;
     activelv--;
 
+    // relief tiles render their image for the current zoom; tiles that were rendered for another
+    // zoom are redone here, a few per frame, from their cached heights
+    const bool relief = lopt.reliefActive() && dim == DIM_OVERWORLD;
+    viewb2p = (float) blocks2pix;
+    QElapsedTimer relieftimer;
+    relieftimer.start();
+    reliefpending = false;
+
     QFont oldfont = painter.font();
     QFont smallfont = oldfont;
     smallfont.setPointSize(oldfont.pointSize() - 2);
@@ -1253,7 +1344,29 @@ void QWorld::draw(QPainter& painter, int vw, int vh, qreal focusx, qreal focusz,
             qreal pz = vh/2.0 + (q->tj) * ps - focusz * blocks2pix;
             QRect rec(floor(px),floor(pz), ceil(ps),ceil(ps));
             //QImage img = (*q->img).scaledToWidth(rec.width(), Qt::SmoothTransformation);
-            painter.drawImage(rec, *q->img);
+            if (relief && q->heights && q->done)
+            {
+                if (li == activelv || activelv < 0)
+                {
+                    int k = reliefImageScale(blocks2pix * q->scale);
+                    if (k != q->imgk)
+                    {
+                        if (relieftimer.elapsed() < 8)
+                            q->renderRelief(k);
+                        else
+                            reliefpending = true;
+                    }
+                }
+                // lines are a pixel wide in the image: filter when the image is drawn smaller
+                bool shrink = ps < (*q->img).width();
+                painter.setRenderHint(QPainter::SmoothPixmapTransform, shrink);
+                painter.drawImage(rec, *q->img);
+                painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+            }
+            else
+            {
+                painter.drawImage(rec, *q->img);
+            }
 
             if (sshow[D_GRID] && !gridspacing)
             {
@@ -1261,6 +1374,9 @@ void QWorld::draw(QPainter& painter, int vw, int vh, qreal focusx, qreal focusz,
             }
         }
     }
+
+    if (reliefpending)
+        QTimer::singleShot(0, this, &QWorld::update);
 
     if (sshow[D_GRID] && gridspacing)
     {
@@ -1699,7 +1815,10 @@ void QWorld::draw(QPainter& painter, int vw, int vh, qreal focusx, qreal focusz,
     if (activelv >= (int)lvb.size()-1)
         activelv = lvb.size() - 1;
     int pixs = lvb[activelv].pixs;
-    unsigned int cachesize = memlimit / pixs / pixs / (3+4); // sizeof(RGB) + sizeof(biome_id)
+    int pixbytes = 3+4; // sizeof(RGB) + sizeof(biome_id)
+    if (relief) // also a height per sample, and an image of up to 2x2 (fine) or 4x4 (fast) pixels per sample
+        pixbytes = (lopt.relief.detail ? 3*4 : 3*16) + 4 + 4;
+    unsigned int cachesize = memlimit / pixs / pixs / pixbytes;
 
     cleancache(cachedbiomes, cachesize);
     cleancache(cachedstruct, cachesize);

@@ -12,6 +12,7 @@
 #include <QElapsedTimer>
 #include <QTimer>
 #include "world.h"
+#include "relief.h"
 
 extern "C"
 int getStructureConfig_override(int stype, int mc, StructureConfig *sconf)
@@ -44,7 +45,7 @@ int main(int argc, char *argv[])
     bool usage = false;
     QString sessionpath;
     QString resultspath;
-    QString grabpath, grabwinpath, grabsize, grablayer;
+    QString grabpath, grabwinpath, grabsize, grablayer, grabzoom;
 
     for (int i = 1; i < argc; i++)
     {
@@ -72,6 +73,8 @@ int main(int argc, char *argv[])
             grabsize = argv[i] + 12;
         else if (strncmp(argv[i], "--layer=", 8) == 0)
             grablayer = argv[i] + 8;
+        else if (strncmp(argv[i], "--grab-zoom=", 12) == 0)
+            grabzoom = argv[i] + 12;
         else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0)
             usage = true;
     }
@@ -94,6 +97,7 @@ int main(int argc, char *argv[])
                 "      --grab-size=WxH        Window size for --grab (default 1600x1000).\n"
                 "      --layer=mode,disp      Map layer for --grab, e.g. 0,0 biomes; 12,5 height layer with\n"
                 "                             hypsometric tints and mountain outline.\n"
+                "      --grab-zoom=s:file.png After --grab, zoom to s blocks per pixel and save a second image.\n"
                 "\n";
         printf("%s", msg);
         exit(0);
@@ -160,24 +164,59 @@ int main(int argc, char *argv[])
             QElapsedTimer *clock = new QElapsedTimer();
             clock->start();
             int *idle = new int(0);
-            QObject::connect(timer, &QTimer::timeout, [&mw, &app, timer, clock, idle, grabpath, grabwinpath]() {
+            int *phase = new int(0);
+            qint64 *before = new qint64[4]();
+            QObject::connect(timer, &QTimer::timeout, [&mw, &app, timer, clock, idle, phase, before, grabpath, grabwinpath, grabzoom]() {
                 MapView *mv = mw.getMapView();
                 mv->update();
-                *idle = (mv->world && !mv->world->isBusy() && clock->elapsed() > 1500) ? *idle + 1 : 0;
+                bool busy = !mv->world || mv->world->isBusy() || mv->world->reliefpending;
+                if (busy)
+                    before[3] = clock->elapsed(); // the map was still being generated at this time
+                *idle = (!busy && clock->elapsed() > 1500) ? *idle + 1 : 0;
                 if (*idle < 6 && clock->elapsed() < 600000)
                     return;
-                timer->stop();
                 bool ok = true;
-                if (!grabpath.isEmpty())
-                    ok &= mv->grab().save(grabpath);
-                if (!grabwinpath.isEmpty())
-                    ok &= mw.grab().save(grabwinpath);
                 WorldInfo wi;
                 mw.getSeed(&wi, false);
-                printf("grab: %s seed=%" PRId64 " mc=%s tectonic=%d x=%.0f z=%.0f scale=%g map=%dx%d after %.1fs\n",
-                    ok ? "saved" : "FAILED", (int64_t)wi.seed, mc2str(wi.mc), wi.tectonic,
-                    mv->getX(), mv->getZ(), mv->getScale(), mv->width(), mv->height(), clock->elapsed() / 1000.0);
-                fflush(stdout);
+                qint64 tiles = g_tile_count - before[0], samples = g_tile_samples, ns = g_tile_ns;
+                if (*phase == 0)
+                {
+                    if (!grabpath.isEmpty())
+                        ok &= mv->grab().save(grabpath);
+                    if (!grabwinpath.isEmpty())
+                        ok &= mw.grab().save(grabwinpath);
+                    printf("grab: %s seed=%" PRId64 " mc=%s tectonic=%d x=%.0f z=%.0f scale=%g map=%dx%d after %.1fs\n",
+                        ok ? "saved" : "FAILED", (int64_t)wi.seed, mc2str(wi.mc), wi.tectonic,
+                        mv->getX(), mv->getZ(), mv->getScale(), mv->width(), mv->height(), clock->elapsed() / 1000.0);
+                    if (tiles > 0)
+                        printf("tiles: %lld generated, %.1f ms per tile, %.2f us per sample, %.2f s summed over the workers, "
+                            "map complete within %.2f s; relief images: %lld rendered, %.2f ms each\n",
+                            (long long)tiles, ns / 1e6 / tiles, ns / 1e3 / (samples ? samples : 1), ns / 1e9,
+                            (before[3] + 150) / 1e3,
+                            (long long)g_relief_count, g_relief_count ? g_relief_ns / 1e6 / g_relief_count : 0.0);
+                    fflush(stdout);
+                    double scale2 = 0;
+                    int pos = grabzoom.indexOf(':');
+                    if (ok && pos > 0 && (scale2 = grabzoom.left(pos).toDouble()) > 0)
+                    {   // second view: same position, another zoom
+                        *phase = 1;
+                        *idle = 0;
+                        before[0] = g_tile_count; before[1] = g_relief_count; before[2] = g_relief_ns;
+                        clock->restart();
+                        mw.mapGoto(mv->getX(), mv->getZ(), scale2);
+                        return;
+                    }
+                }
+                else
+                {
+                    ok &= mv->grab().save(grabzoom.mid(grabzoom.indexOf(':') + 1));
+                    qint64 rr = g_relief_count - before[1];
+                    printf("zoom: %s scale=%g after %.1fs: %lld new tiles generated, %lld relief images rendered from cached heights (%.2f ms each)\n",
+                        ok ? "saved" : "FAILED", mv->getScale(), clock->elapsed() / 1000.0, (long long)tiles,
+                        (long long)(rr - tiles), rr ? (g_relief_ns - before[2]) / 1e6 / rr : 0.0);
+                    fflush(stdout);
+                }
+                timer->stop();
                 mw.close(); // saves settings and session like a normal exit
                 app.exit(ok ? 0 : 1);
             });
