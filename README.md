@@ -76,7 +76,7 @@ to the biome layer of the Overworld; the Nether and the End keep the plain biome
 The options are saved with the settings (`map/relief*`), not in session files.
 
 Where lines would be closer than about 2.5 pixels (steep slopes, zoomed out) they turn into shading of the same
-tone instead of merging into black. From 16 blocks per pixel on (*Fast*) or 64 (*Fine*) the samples are too far
+tone instead of merging into black. From 16 blocks per pixel on (*Fast*) or 32 (*Fine*) the samples are too far
 apart to trace lines, and only the shading (and at first the index contours) remains.
 
 Heights: with Tectonic the **base surface** (exact; Tectonic's peaks, which add up to ~130 blocks on mountain
@@ -98,8 +98,12 @@ samples; worker seconds per megapixel of map (in brackets: milliseconds per tile
 | 1   | 1.5 (10) | 0.6 (36) | 4.6 (30) | 1.4 (10) | 0.5 (37) | 1.5 (10) |
 | 2.7 | 8.9 (9)  | 2.8 (34) | 2.8 (34) | 2.5 (36) | 2.2 (32) | 2.2 (32) |
 | 4   | 5.8 (38) | 0.7 (36) | 4.9 (32) | 5.1 (34) | 0.7 (44) | 4.6 (30) |
-| 16  | 5.7 (36) | 0.9 (37) | 5.0 (32) | 3.4 (21) | 1.0 (57) | about as plain |
-| 64  | 6.2 (38) | 0.8 (41) | 5.5 (34) | 6.1 (36) | 1.5 (68) | about as plain |
+| 16  | 5.7 (36) | 0.9 (37) | 5.0 (32) | 3.4 (21) | see below | see below |
+| 64  | 6.2 (38) | 0.8 (41) | 5.5 (34) | 6.1 (36) | see below | see below |
+
+The vanilla relief rows for 16 and 64 blocks per pixel were measured later, while the machine was about twice
+as loaded, together with the plain map: plain 5.3 / fast 1.2 / fine 5.8 at 16, and plain 9.9 / fast 2.3 / fine 11.4
+at 64 (per sample the relief costs about 10-15% more than the plain map there).
 
 With three threads a full map appears in about 0.3 s in the fast mode at 4, 16 and 64 blocks per pixel and in
 about 0.9 s at the least favourable zoom. Sampling costs 1.9-2.2 microseconds per pixel for Tectonic (biome and
