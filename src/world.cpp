@@ -141,7 +141,7 @@ QStringList VarPos::detail() const
 Quad::Quad(const Level* l, int64_t i, int64_t j)
     : wi(l->wi),dim(l->dim),lopt(l->lopt),g(&l->g),sn(&l->sn),highres(l->highres),scale(l->scale)
     , ti(i),tj(j),blocks(l->blocks),pixs(l->pixs),sopt(l->sopt)
-    , biomes(),rgb(),heights(),imgk(1),viewb2p(l->viewb2p),img(),spos()
+    , biomes(),rgb(),heights(),imgk(1),imgstep(0),viewb2p(l->viewb2p),img(),spos()
 {
     isdel = l->isdel;
     setAutoDelete(false);
@@ -475,7 +475,7 @@ void Quad::updateBiomeColor()
     {
         QElapsedTimer timer;
         timer.start();
-        reliefRender(rgb, biomes, heights, r.sx, r.sz, imgk, scale, lopt.relief, dim, g_biomeColors);
+        reliefRender(rgb, biomes, heights, r.sx, r.sz, imgk, scale, imgstep, lopt.relief, dim, g_biomeColors);
         g_relief_ns += timer.nsecsElapsed();
         g_relief_count++;
     }
@@ -495,13 +495,14 @@ void Quad::updateBiomeColor()
     }
 }
 
-void Quad::renderRelief(int k)
+void Quad::renderRelief(int k, int step)
 {
-    if (!heights || !biomes || !done || k == imgk)
+    if (!heights || !biomes || !done || (k == imgk && step == imgstep))
         return;
     uchar *oldrgb = rgb;
     QImage *oldimg = img;
     imgk = k;
+    imgstep = step;
     rgb = new uchar[r.sx*k * r.sz*k * 3];
     updateBiomeColor();
     img = new QImage(rgb, r.sx*k, r.sz*k, 3*r.sx*k, QImage::Format_RGB888);
@@ -575,8 +576,12 @@ void Quad::run()
                 biomes[i] = -1;
         }
 
-        if (heights) // image pixels per sample for the current zoom
-            imgk = reliefImageScale((viewb2p ? viewb2p->load() : 1.0f) * scale);
+        if (heights)
+        {   // image pixels per sample and line/relief balance for the current zoom
+            float b2p = viewb2p ? viewb2p->load() : 1.0f;
+            imgk = reliefImageScale(b2p * scale);
+            imgstep = reliefZoomStep(lopt.relief, 1.0 / b2p);
+        }
         rgb = new uchar[w*imgk * h*imgk * 3]();
         updateBiomeColor();
         img = new QImage(rgb, w*imgk, h*imgk, 3*w*imgk, QImage::Format_RGB888);
@@ -951,7 +956,7 @@ void QWorld::setDim(int dim, LayerOpt lopt)
         // the image is rendered at up to four pixels per sample
         pixs = 128;
         lcnt = 6;
-        qual = lopt.relief.detail ? 2.0 : 4.0;
+        qual = reliefQuality(lopt.relief, 1.0); // follows the zoom, see draw()
     }
     else if (dim == DIM_OVERWORLD && wi.isTectonic())
     {   // Tectonic's base surface and climate are cheap to evaluate: full resolution
@@ -1304,6 +1309,9 @@ void QWorld::draw(QPainter& painter, int vw, int vh, qreal focusx, qreal focusz,
 
     // determine the active level, which represents a scale resolution of:
     // [0] 1:1, [1] 1:4, [2] 1:16, [3] 1:64, [4] 1:256
+    const bool relief = lopt.reliefActive() && dim == DIM_OVERWORLD;
+    if (relief)
+        qual = reliefQuality(lopt.relief, 1.0 / blocks2pix);
     qreal imgres = qual;
     for (activelv = 0; activelv < (int)lvb.size(); activelv++, imgres /= 4)
         if (blocks2pix > imgres)
@@ -1312,7 +1320,6 @@ void QWorld::draw(QPainter& painter, int vw, int vh, qreal focusx, qreal focusz,
 
     // relief tiles render their image for the current zoom; tiles that were rendered for another
     // zoom are redone here, a few per frame, from their cached heights
-    const bool relief = lopt.reliefActive() && dim == DIM_OVERWORLD;
     viewb2p = (float) blocks2pix;
     QElapsedTimer relieftimer;
     relieftimer.start();
@@ -1349,10 +1356,11 @@ void QWorld::draw(QPainter& painter, int vw, int vh, qreal focusx, qreal focusz,
                 if (li == activelv || activelv < 0)
                 {
                     int k = reliefImageScale(blocks2pix * q->scale);
-                    if (k != q->imgk)
+                    int step = reliefZoomStep(lopt.relief, 1.0 / blocks2pix);
+                    if (k != q->imgk || step != q->imgstep)
                     {
                         if (relieftimer.elapsed() < 8)
-                            q->renderRelief(k);
+                            q->renderRelief(k, step);
                         else
                             reliefpending = true;
                     }
@@ -1817,7 +1825,7 @@ void QWorld::draw(QPainter& painter, int vw, int vh, qreal focusx, qreal focusz,
     int pixs = lvb[activelv].pixs;
     int pixbytes = 3+4; // sizeof(RGB) + sizeof(biome_id)
     if (relief) // also a height per sample, and an image of up to 2x2 (fine) or 4x4 (fast) pixels per sample
-        pixbytes = (lopt.relief.detail ? 3*4 : 3*16) + 4 + 4;
+        pixbytes = (lopt.relief.detail == ReliefOpt::FINE ? 3*4 : 3*16) + 4 + 4;
     unsigned int cachesize = memlimit / pixs / pixs / pixbytes;
 
     cleancache(cachedbiomes, cachesize);

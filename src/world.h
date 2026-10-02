@@ -66,8 +66,9 @@ struct Quad : public Scheduled
 
     void run();
     void updateBiomeColor();
-    // relief: render the image again at k image pixels per sample (GUI thread, finished tiles only)
-    void renderRelief(int k);
+    // relief: render the image again at k image pixels per sample for a zoom step
+    // (GUI thread, finished tiles only)
+    void renderRelief(int k, int step);
 
     WorldInfo wi;
     int dim;
@@ -86,6 +87,7 @@ struct Quad : public Scheduled
     uchar *rgb;
     float *heights; // relief: surface heights with a border of RELIEF_BORDER samples
     int imgk;       // relief: image pixels per sample
+    int imgstep;    // relief: zoom step the image was rendered for (see reliefZoomStep)
     const std::atomic<float> *viewb2p; // current zoom of the view (screen pixels per block)
 
     // img and spos act as an atomic gate (with NULL or non-NULL indicating available results)

@@ -114,7 +114,12 @@ struct ReliefOpt
     int interval;   // contour interval in blocks, 0 = automatic (follows the zoom)
     bool shading;   // soft hillshade under the lines
     int strength;   // line strength in percent
-    int detail;     // 0 = fast (a sample per 1-4 screen pixels), 1 = fine (per 0.5-2)
+    // sampling: a height sample per 1-4 screen pixels (fast), per 0.5-2 (fine), or fast while the
+    // contour lines are drawn and fine once the shaded relief has taken over (balanced)
+    enum { BALANCED = 0, FAST = 1, FINE = 2 };
+    int detail;
+    int farstyle;   // zoomed out: 0 = shaded relief without lines, 1 = keep the contour lines
+    int shade;      // strength of the shading in percent (hillshade and shaded relief)
 
     ReliefOpt() { reset(); }
 

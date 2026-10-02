@@ -128,7 +128,9 @@ void ReliefOpt::reset()
     interval = 0;
     shading = true;
     strength = 75;
-    detail = 0;
+    detail = BALANCED;
+    farstyle = 0;
+    shade = 60;
 }
 
 void ReliefOpt::load(QSettings& settings)
@@ -137,10 +139,14 @@ void ReliefOpt::load(QSettings& settings)
     interval = settings.value("map/reliefInterval", interval).toInt();
     shading = settings.value("map/reliefShading", shading).toBool();
     strength = settings.value("map/reliefStrength", strength).toInt();
-    detail = settings.value("map/reliefDetail", detail).toInt();
+    detail = settings.value("map/reliefRes", detail).toInt();
     if (interval < 0 || interval > 256) interval = 0;
     if (strength < 0 || strength > 100) strength = 75;
-    if (detail < 0 || detail > 1) detail = 0;
+    farstyle = settings.value("map/reliefFar", farstyle).toInt();
+    shade = settings.value("map/reliefShade", shade).toInt();
+    if (detail < BALANCED || detail > FINE) detail = BALANCED;
+    if (farstyle < 0 || farstyle > 1) farstyle = 0;
+    if (shade < 0 || shade > 100) shade = 60;
 }
 
 void ReliefOpt::save(QSettings& settings)
@@ -149,13 +155,15 @@ void ReliefOpt::save(QSettings& settings)
     settings.setValue("map/reliefInterval", interval);
     settings.setValue("map/reliefShading", shading);
     settings.setValue("map/reliefStrength", strength);
-    settings.setValue("map/reliefDetail", detail);
+    settings.setValue("map/reliefRes", detail);
+    settings.setValue("map/reliefFar", farstyle);
+    settings.setValue("map/reliefShade", shade);
 }
 
 bool ReliefOpt::equals(const ReliefOpt& o) const
 {
     return enabled == o.enabled && interval == o.interval && shading == o.shading &&
-        strength == o.strength && detail == o.detail;
+        strength == o.strength && detail == o.detail && farstyle == o.farstyle && shade == o.shade;
 }
 
 void LayerOpt::reset()

@@ -1192,9 +1192,22 @@ void MainWindow::onReliefOptions()
     interval->setToolTip(tr("Height difference between two contour lines. Every fifth line is an index contour."));
     form->addRow(tr("Contour interval:"), interval);
 
+    QComboBox *farstyle = new QComboBox(dialog);
+    farstyle->addItem(tr("Shaded relief (lines fade out from 3 to 7 blocks per pixel)"), 0);
+    farstyle->addItem(tr("Contour lines at every zoom"), 1);
+    farstyle->setCurrentIndex(lopt.relief.farstyle ? 1 : 0);
+    farstyle->setToolTip(tr("Shaded relief: the ground is lit from the north-west, slopes facing away are in shadow; water stays flat."));
+    form->addRow(tr("Zoomed out:"), farstyle);
+
     QCheckBox *shading = new QCheckBox(tr("Soft hillshade under the lines"), dialog);
     shading->setChecked(lopt.relief.shading);
     form->addRow(shading);
+
+    QSlider *shade = new QSlider(Qt::Horizontal, dialog);
+    shade->setRange(0, 100);
+    shade->setValue(lopt.relief.shade);
+    shade->setToolTip(tr("Strength of the hillshade and of the shaded relief."));
+    form->addRow(tr("Shading strength:"), shade);
 
     QSlider *strength = new QSlider(Qt::Horizontal, dialog);
     strength->setRange(0, 100);
@@ -1202,9 +1215,10 @@ void MainWindow::onReliefOptions()
     form->addRow(tr("Line strength:"), strength);
 
     QComboBox *detail = new QComboBox(dialog);
-    detail->addItem(tr("Fast (a height sample per 1-4 screen pixels)"), 0);
-    detail->addItem(tr("Fine (a sample per 0.5-2 pixels, about 4x slower)"), 1);
-    detail->setCurrentIndex(lopt.relief.detail ? 1 : 0);
+    detail->addItem(tr("Balanced (fast for contour lines, fine for shaded relief)"), ReliefOpt::BALANCED);
+    detail->addItem(tr("Fast (a height sample per 1-4 screen pixels)"), ReliefOpt::FAST);
+    detail->addItem(tr("Fine (a sample per 0.5-2 pixels, up to 16x slower)"), ReliefOpt::FINE);
+    detail->setCurrentIndex(std::max(0, detail->findData(lopt.relief.detail)));
     form->addRow(tr("Resolution:"), detail);
 
     QLabel *note = new QLabel(tr(
@@ -1222,7 +1236,9 @@ void MainWindow::onReliefOptions()
         r.interval = interval->currentData().toInt();
         r.shading = shading->isChecked();
         r.strength = strength->value();
-        r.detail = detail->currentIndex();
+        r.detail = detail->currentData().toInt();
+        r.farstyle = farstyle->currentIndex();
+        r.shade = shade->value();
         bool on = enable->isChecked();
         if (on != lopt.relief.enabled)
         {

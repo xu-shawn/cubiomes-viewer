@@ -28,6 +28,32 @@ int reliefImageScale(qreal pixPerSample)
     return 4;
 }
 
+enum { FAR_STEP0 = 6, FAR_STEP1 = 12 }; // quarter octaves of blocks per pixel: 2^(6/4) = 2.8, 2^(12/4) = 8
+
+int reliefZoomStep(const ReliefOpt& opt, qreal blocksPerPixel)
+{
+    if (opt.farstyle != 0 || blocksPerPixel <= 0)
+        return FAR_STEP0; // contour lines at every zoom
+    int step = (int) floor(4 * log2(blocksPerPixel) + 0.5);
+    return step < FAR_STEP0 ? FAR_STEP0 : (step > FAR_STEP1 ? FAR_STEP1 : step);
+}
+
+qreal reliefQuality(const ReliefOpt& opt, qreal blocksPerPixel)
+{
+    if (opt.detail == ReliefOpt::FINE)
+        return 2.0;
+    if (opt.detail == ReliefOpt::BALANCED && opt.farstyle == 0 && blocksPerPixel >= 8.0)
+        return 2.0;
+    return 4.0;
+}
+
+float reliefFarBlend(int step)
+{
+    float u = (step - FAR_STEP0) / (float) (FAR_STEP1 - FAR_STEP0);
+    u = u < 0 ? 0 : (u > 1 ? 1 : u);
+    return u * u * (3 - 2 * u);
+}
+
 // 1.18+ noise biomes: the climate sample that selects the biome also carries the depth, from which
 // mapApproxHeight() derives the surface. One sample per pixel yields both.
 // The biome lookup takes a search hint (the previous result), which speeds it up without making
@@ -156,13 +182,93 @@ static inline int floordiv5(int a)
 }
 
 void reliefRender(unsigned char *rgb, const int *biomes, const float *heights,
-        int w, int h, int k, int scale, const ReliefOpt& opt, int dim,
+        int w, int h, int k, int scale, int step, const ReliefOpt& opt, int dim,
         const unsigned char colors[256][3])
 {
     const int B = RELIEF_BORDER, b = 2;
     const int W = w * k, H = h * k;
     const int sw = w + 2*B;
     const int iw = W + 2*b, ih = H + 2*b;
+    // share of the shaded relief that replaces the lines when zoomed out
+    const float far = reliefFarBlend(step);
+    // strength of the shading relative to the default
+    const float shd = opt.shade / 100.0f;
+    const float shr = shd / 0.6f;
+
+    // Shaded relief: the light of a surface facing north-west, from the slope between neighbouring
+    // samples. It is computed per sample and interpolated, so it does not show the facets of the
+    // interpolated heights. Slopes flatten as samples get farther apart, so the heights are
+    // exaggerated with the sample spacing; mountains keep their shape at every zoom.
+    std::vector<float> lit;
+    const int lw = w + 2;
+    if (far > 0)
+    {
+        const float ex = 2.2f * (scale <= 4 ? 1.0f : powf(scale / 4.0f, 0.7f));
+        const float f = ex / (2.0f * scale);
+        const float lmin = 1.0f - 0.75f * shd, lmax = 1.0f + 0.42f * shd;
+        lit.resize((size_t)lw * (h + 2));
+        for (int j = -1; j <= h; j++)
+        {
+            const float *p = heights + (size_t)(j + B) * sw + (B - 1);
+            float *o = &lit[(size_t)(j + 1) * lw];
+            for (int i = -1; i <= w; i++, p++, o++)
+            {
+                float sx = (p[1] - p[-1]) * f, sz = (p[sw] - p[-sw]) * f;
+                // Lambert term for a light 45 degrees above the north-western horizon, 1 on flat ground
+                float rel = (1.0f + 0.70710678f * (sx + sz)) / sqrtf(1.0f + sx*sx + sz*sz);
+                float l = 1.0f + shd * (rel - 1.0f);
+                *o = l < lmin ? lmin : (l > lmax ? lmax : l);
+            }
+        }
+    }
+
+    if (far >= 1.0f)
+    {   // shaded relief only: biome colour times the interpolated light, water flat
+        const bool hassea = (dim == DIM_OVERWORLD);
+        const float invk = 1.0f / k;
+        std::vector<int> ci(std::max(W, H));
+        std::vector<float> cf(std::max(W, H));
+        for (int I = 0; I < std::max(W, H); I++)
+        {
+            float u = (I + 0.5f) * invk - 0.5f;
+            ci[I] = (int) floorf(u);
+            cf[I] = u - ci[I];
+        }
+        for (int J = 0; J < H; J++)
+        {
+            const int *brow = biomes + (size_t)(J / k) * w;
+            const float *h0 = heights + (size_t)(ci[J] + B) * sw + B;
+            const float *q0 = &lit[(size_t)(ci[J] + 1) * lw + 1];
+            const float fv = cf[J];
+            unsigned char *out = rgb + (size_t)3 * J * W;
+            for (int I = 0; I < W; I++, out += 3)
+            {
+                int id = brow[I / k];
+                float c[3] = {0, 0, 0};
+                if (id >= 0 && id < 256)
+                {
+                    c[0] = colors[id][0]; c[1] = colors[id][1]; c[2] = colors[id][2];
+                }
+                // the same interpolated height as in the line rendering decides what is water
+                const float *hp = h0 + ci[I];
+                float fu = cf[I];
+                float ha = hp[0] + fu * (hp[1] - hp[0]);
+                float hb = hp[sw] + fu * (hp[sw+1] - hp[sw]);
+                if (!(hassea && ha + fv * (hb - ha) < 63.f))
+                {
+                    const float *q = q0 + ci[I];
+                    float l0 = q[0] + fu * (q[1] - q[0]);
+                    float l1 = q[lw] + fu * (q[lw+1] - q[lw]);
+                    float l = l0 + fv * (l1 - l0);
+                    c[0] *= l; c[1] *= l; c[2] *= l;
+                }
+                out[0] = (unsigned char)(c[0] <= 0 ? 0 : (c[0] >= 255.f ? 255 : c[0]));
+                out[1] = (unsigned char)(c[1] <= 0 ? 0 : (c[1] >= 255.f ? 255 : c[1]));
+                out[2] = (unsigned char)(c[2] <= 0 ? 0 : (c[2] >= 255.f ? 255 : c[2]));
+            }
+        }
+        return;
+    }
 
     // heights at image resolution, with a border of two image pixels
     std::vector<float> hi((size_t)iw * ih);
@@ -203,7 +309,12 @@ void reliefRender(unsigned char *rgb, const int *biomes, const float *heights,
     const bool hassea = (dim == DIM_OVERWORLD);
     const float base = hassea ? 63.f : 0.f; // contour levels are counted from sea level
     const float inv = 1.0f / iv;
-    const float str = opt.strength / 100.0f;
+    const float str = opt.strength / 100.0f * (1.0f - far); // the lines fade out as the relief takes over
+    // hillshade under the lines: coefficient and limits scale with the shading strength
+    const float hsc = shr == 1.0f ? 0.40f : 0.40f * shr;
+    const float hsmin = shr == 1.0f ? 0.78f : 1.0f - 0.22f * shr;
+    const float hsmax = shr == 1.0f ? 1.18f : 1.0f + 0.18f * shr;
+    const float invk = 1.0f / k;
     // slopes are in blocks per block; beyond 16 blocks per pixel neighbouring samples are far apart
     // and the relief is exaggerated instead of fading out
     const float islope = 1.0f / (bpp < 16 ? bpp : 16);
@@ -272,12 +383,26 @@ void reliefRender(unsigned char *rgb, const int *biomes, const float *heights,
             }
             else
             {
+                float l = 1.0f;
                 if (opt.shading)
                 {   // soft hillshade under the lines, from the slope over five pixels so that
                     // small bumps do not turn into texture
                     float sx = (p[2] - p[-2]) * 0.25f * islope, sz = (p[2*iw] - p[-2*iw]) * 0.25f * islope;
-                    float l = 1.0f + 0.40f * (sx + sz) / sqrtf(1.0f + 2.0f * (sx*sx + sz*sz));
-                    l = l < 0.78f ? 0.78f : (l > 1.18f ? 1.18f : l);
+                    l = 1.0f + hsc * (sx + sz) / sqrtf(1.0f + 2.0f * (sx*sx + sz*sz));
+                    l = l < hsmin ? hsmin : (l > hsmax ? hsmax : l);
+                }
+                if (far > 0)
+                {   // shaded relief, interpolated between the samples
+                    float u = (I + 0.5f) * invk - 0.5f, v = (J + 0.5f) * invk - 0.5f;
+                    int ui = (int) floorf(u), vi = (int) floorf(v);
+                    float fu = u - ui, fv = v - vi;
+                    const float *q0 = &lit[(size_t)(vi + 1) * lw + (ui + 1)];
+                    float l0 = q0[0] + fu * (q0[1] - q0[0]);
+                    float l1 = q0[lw] + fu * (q0[lw+1] - q0[lw]);
+                    l += far * (l0 + fv * (l1 - l0) - l);
+                }
+                if (l != 1.0f)
+                {
                     c[0] *= l; c[1] *= l; c[2] *= l;
                 }
                 // illuminated contours: light on slopes facing the light, dark on slopes facing away
